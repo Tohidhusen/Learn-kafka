@@ -1,0 +1,20 @@
+
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    # Produce events to Inventory Service
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        schema.registry.url: http://127.0.0.1:8081
+
+    # Consume events from Inventory Service
+    consumer:
+      group-id: order-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: http://127.0.0.1:8081
+        specific.avro.reader: true

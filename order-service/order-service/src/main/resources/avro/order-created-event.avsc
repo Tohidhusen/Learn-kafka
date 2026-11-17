@@ -1,0 +1,23 @@
+{
+  "name": "OrderCreatedEvent",
+  "type": "record",
+  "namespace": "com.homework.learnkafka",
+  "fields": [
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "orderStatus",
+      "type": "string"
+    },
+    {
+      "name": "orderTotal",
+      "type": "double"
+    },
+    {
+      "name": "quantity",
+      "type": "int"
+    }
+    ]
+}
