@@ -1,0 +1,665 @@
+# Kafka + Avro: Order Service and Inventory Service
+
+## 1. Project Overview
+
+This project demonstrates asynchronous communication between two Spring Boot microservices using Apache Kafka, Apache Avro, and Confluent Schema Registry.
+
+The services are:
+
+- **Order Service:** Creates orders and publishes order events.
+- **Inventory Service:** Consumes order events, processes inventory, and publishes inventory response events.
+
+## 2. Technologies Used
+
+- Java
+- Spring Boot
+- Apache Kafka
+- Apache Avro
+- Confluent Schema Registry
+- Docker and Docker Compose
+- Maven
+
+## 3. Architecture
+
+```text
+             ORDER SERVICE
+                   |
+          OrderCreatedEvent
+                   |
+                   v
+          order-created-topic
+                   |
+                   v
+           INVENTORY SERVICE
+                   |
+             Business Logic
+                   |
+            Updates Stock
+                   |
+          InventoryUpdatedEvent
+                   |
+                   v
+         inventory-updated-topic
+                   |
+                   v
+             ORDER SERVICE
+                   |
+            Updates Order Status
+```
+
+Both services can act as Kafka producers and consumers.
+
+## 4. Local and Docker Connection Settings
+
+This is an important configuration detail.
+
+The Kafka and Schema Registry addresses depend on where your Spring Boot applications are running.
+
+There are two different networking environments:
+
+1. Spring Boot application running directly on your Windows machine.
+2. Spring Boot application running inside a Docker container.
+
+### A. When Spring Boot runs locally on Windows
+
+For example, when you start Order Service or Inventory Service directly from IntelliJ IDEA, the application runs outside Docker.
+
+Use:
+
+| Service | Address |
+|---|---|
+| Kafka | `localhost:9092` |
+| Schema Registry | `http://localhost:8081` |
+
+Example `application.yml`:
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        schema.registry.url: http://localhost:8081
+
+    consumer:
+      group-id: order-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: http://localhost:8081
+        specific.avro.reader: true
+```
+
+Here, `localhost` refers to your Windows machine.
+
+### B. When Spring Boot runs inside Docker
+
+If you put Order Service and Inventory Service inside Docker containers, `localhost` no longer refers to the Windows host.
+
+Inside a container, `localhost` refers to that particular container itself.
+
+Therefore, applications running in the same Docker Compose network should use Docker service names.
+
+Use:
+
+| Service | Address |
+|---|---|
+| Kafka | `broker:29092` |
+| Schema Registry | `http://schema-registry:8081` |
+
+Example:
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: broker:29092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        schema.registry.url: http://schema-registry:8081
+
+    consumer:
+      group-id: order-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: http://schema-registry:8081
+        specific.avro.reader: true
+```
+
+**Important:** These Docker addresses assume your Compose services are named `broker` and `schema-registry`, and that Kafka's internal listener is configured on port `29092`.
+
+### C. Why are there two different addresses?
+
+Consider this example:
+
+```text
+WINDOWS MACHINE
+|
+|-- Order Service (IntelliJ)
+|       |
+|       +---- localhost:9092
+|       |
+|       +---- localhost:8081
+|
+|-- Inventory Service (IntelliJ)
+|       |
+|       +---- localhost:9092
+|       |
+|       +---- localhost:8081
+|
+|-- DOCKER NETWORK
+        |
+        |-- Kafka broker
+        |       Internal address: broker:29092
+        |
+        |-- Schema Registry
+                Internal address: schema-registry:8081
+```
+
+The Docker containers expose ports to the Windows host, allowing locally running applications to connect through `localhost`.
+
+For example:
+
+```text
+Windows application --> localhost:9092 --> Docker Kafka
+Windows application --> localhost:8081 --> Docker Schema Registry
+
+Docker application --> broker:29092 --> Docker Kafka
+Docker application --> schema-registry:8081 --> Docker Schema Registry
+```
+
+### D. Which configuration should this project use?
+
+Currently, Order Service and Inventory Service are running directly from IntelliJ IDEA, while Kafka and Schema Registry are running in Docker.
+
+Therefore, use:
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+```
+
+And:
+
+```yaml
+schema.registry.url: http://localhost:8081
+```
+
+You do not need to change to Docker service names unless you move your Spring Boot applications inside Docker.
+
+### E. Docker commands
+
+Start Docker services:
+
+```powershell
+docker compose up -d
+```
+
+Check running containers:
+
+```powershell
+docker ps
+```
+
+Check Kafka port:
+
+```powershell
+Test-NetConnection localhost -Port 9092
+```
+
+Check Schema Registry port:
+
+```powershell
+Test-NetConnection localhost -Port 8081
+```
+
+Stop containers:
+
+```powershell
+docker compose down
+```
+
+## 5. Kafka Topics
+
+Two topics are used:
+
+| Topic | Purpose |
+|---|---|
+| `order-created-topic` | Order Service to Inventory Service |
+| `inventory-updated-topic` | Inventory Service to Order Service |
+
+Describe a topic:
+
+```powershell
+docker exec broker kafka-topics --bootstrap-server broker:29092 --describe --topic order-created-topic
+```
+
+Check topic offsets:
+
+```powershell
+docker exec broker kafka-get-offsets --bootstrap-server broker:29092 --topic order-created-topic
+```
+
+## 6. Avro Schema and Java Class Generation
+
+Avro defines the structure of an event.
+
+Example `OrderCreatedEvent.avsc`:
+
+```json
+{
+  "type": "record",
+  "name": "OrderCreatedEvent",
+  "namespace": "com.homework.learnkafka",
+  "fields": [
+    {"name": "orderId", "type": "string"},
+    {"name": "orderStatus", "type": "string"},
+    {"name": "orderTotal", "type": "double"},
+    {"name": "quantity", "type": "int"}
+  ]
+}
+```
+
+Generate Java classes:
+
+```powershell
+mvn clean generate-sources
+```
+
+Responsibilities:
+
+- Avro Maven plugin generates Java classes.
+- Schema Registry stores and manages schemas.
+- Kafka transports serialized events.
+
+## 7. Maven Dependencies and Version Alignment
+
+The project uses:
+
+- `spring-boot-starter-kafka`
+- `io.confluent:kafka-avro-serializer`
+- `org.apache.avro:avro`
+- `avro-maven-plugin`
+
+Version configuration:
+
+```xml
+<properties>
+    <avro.version>1.12.0</avro.version>
+    <confluent.version>7.7.1</confluent.version>
+</properties>
+```
+
+The Confluent serializer version was aligned with the Docker Schema Registry version used in the project.
+
+## 8. Order Service Configuration
+
+Order Service has two responsibilities:
+
+- Produce `OrderCreatedEvent`.
+- Consume `InventoryUpdatedEvent`.
+
+For the current local setup:
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        schema.registry.url: http://localhost:8081
+
+    consumer:
+      group-id: order-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: http://localhost:8081
+        specific.avro.reader: true
+```
+
+### Producer
+
+```java
+kafkaTemplate.send("order-created-topic", orderCreatedEvent);
+```
+
+### Consumer
+
+```java
+@KafkaListener(
+    topics = "inventory-updated-topic",
+    groupId = "order-group"
+)
+public void listen(InventoryUpdatedEvent event) {
+
+    System.out.println("Order ID: " + event.getOrderId());
+    System.out.println("Inventory Status: " + event.getStatus());
+
+    // Update order status in database.
+}
+```
+
+## 9. Inventory Service Configuration
+
+Inventory Service also produces and consumes events.
+
+For the current local setup:
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    consumer:
+      group-id: inventory-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: http://localhost:8081
+        specific.avro.reader: true
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        schema.registry.url: http://localhost:8081
+```
+
+### Consumer
+
+```java
+@KafkaListener(
+    topics = "order-created-topic",
+    groupId = "inventory-group"
+)
+public void listen(OrderCreatedEvent event) {
+
+    System.out.println("Message received from Kafka");
+    System.out.println("Order ID: " + event.getOrderId());
+    System.out.println("Quantity: " + event.getQuantity());
+
+    // Check and update inventory.
+}
+```
+
+## 10. Producing a New Event After Consuming an Event
+
+A service can receive one event, execute business logic, create a different event, and publish it.
+
+Example flow:
+
+1. Inventory Service receives `OrderCreatedEvent`.
+2. Checks available stock.
+3. Updates inventory.
+4. Creates `InventoryUpdatedEvent`.
+5. Publishes the response event.
+6. Order Service consumes the response and updates the order status.
+
+### InventoryUpdatedEvent.avsc
+
+```json
+{
+  "type": "record",
+  "name": "InventoryUpdatedEvent",
+  "namespace": "com.homework.learnkafka",
+  "fields": [
+    {"name": "orderId", "type": "string"},
+    {"name": "status", "type": "string"},
+    {"name": "message", "type": "string"}
+  ]
+}
+```
+
+### Inventory Service producer
+
+```java
+InventoryUpdatedEvent response =
+    InventoryUpdatedEvent.newBuilder()
+        .setOrderId(event.getOrderId())
+        .setStatus("SUCCESS")
+        .setMessage("Inventory updated successfully")
+        .build();
+
+kafkaTemplate.send(
+    "inventory-updated-topic",
+    response
+);
+```
+
+Only publish `SUCCESS` after the inventory update has actually succeeded. Publish a failure response if stock is insufficient.
+
+### Order Service consumer
+
+```java
+@KafkaListener(
+    topics = "inventory-updated-topic",
+    groupId = "order-group"
+)
+public void listen(InventoryUpdatedEvent event) {
+
+    System.out.println("Order ID: " + event.getOrderId());
+    System.out.println("Status: " + event.getStatus());
+
+    // Update order status in database.
+}
+```
+
+This is asynchronous event-driven communication, not a synchronous HTTP request-response operation.
+
+## 11. Do Both Services Need Avro Schemas?
+
+Both services need access to the schemas for the event types they produce or consume.
+
+| Schema | Order Service | Inventory Service |
+|---|---|---|
+| `OrderCreatedEvent.avsc` | Produces | Consumes |
+| `InventoryUpdatedEvent.avsc` | Consumes | Produces |
+
+### Option 1: Duplicate schema files
+
+```text
+order-service/
+    src/main/resources/avro/
+        OrderCreatedEvent.avsc
+        InventoryUpdatedEvent.avsc
+
+inventory-service/
+    src/main/resources/avro/
+        OrderCreatedEvent.avsc
+        InventoryUpdatedEvent.avsc
+```
+
+Each service generates its own Java classes.
+
+### Option 2: Shared Maven module
+
+```text
+project/
+    kafka-events/
+        src/main/avro/
+            OrderCreatedEvent.avsc
+            InventoryUpdatedEvent.avsc
+
+    order-service/
+    inventory-service/
+```
+
+Both services depend on the shared module.
+
+This reduces schema duplication and makes version management easier.
+
+## 12. Problems Encountered and Solutions
+
+### Problem 1: Kafka port 9092 already in use
+
+Find the process:
+
+```powershell
+Get-NetTCPConnection -LocalPort 9092 -State Listen |
+Select-Object LocalAddress, LocalPort, OwningProcess
+```
+
+The conflicting process was a local Kafka installation under `C:\kafka`.
+
+Stop the local broker before starting the Docker broker.
+
+### Problem 2: Schema Registry connection refused
+
+Check:
+
+```powershell
+Test-NetConnection localhost -Port 8081
+```
+
+Start Schema Registry:
+
+```powershell
+docker compose up -d schema-registry
+```
+
+### Problem 3: Confluent version mismatch
+
+The application initially used Confluent `8.1.6`, while Docker Schema Registry was `7.7.1`.
+
+The Confluent dependency version was aligned to `7.7.1`. The user confirmed that the application worked afterward.
+
+### Problem 4: String deserialization error
+
+Error:
+
+```text
+Cannot convert from OrderCreatedEvent to String
+```
+
+Cause: The listener expected a String, but the Avro deserializer returned an Avro-generated object.
+
+Solution:
+
+```java
+public void listen(OrderCreatedEvent message)
+```
+
+### Problem 5: String serializer error
+
+Error:
+
+```text
+OrderCreatedEvent cannot be cast to java.lang.String
+```
+
+Cause: `StringSerializer` was configured for the event value.
+
+Solution:
+
+```yaml
+value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+```
+
+### Problem 6: Avro NullPointerException
+
+Error:
+
+```text
+Cannot invoke Object.getClass() because datum is null
+```
+
+Cause: At least one required String field in the Avro record was null.
+
+Solution: Check the event fields before publishing. Required fields must have valid values.
+
+For optional fields, use a nullable Avro union such as:
+
+```json
+{
+  "name": "message",
+  "type": ["null", "string"],
+  "default": null
+}
+```
+
+### Problem 7: GetOffsetShell command failed
+
+Use:
+
+```powershell
+docker exec broker kafka-get-offsets --bootstrap-server broker:29092 --topic order-created-topic
+```
+
+## 13. Verification and Testing
+
+Describe a topic:
+
+```powershell
+docker exec broker kafka-topics --bootstrap-server broker:29092 --describe --topic order-created-topic
+```
+
+Check offsets:
+
+```powershell
+docker exec broker kafka-get-offsets --bootstrap-server broker:29092 --topic order-created-topic
+```
+
+Expected application flow:
+
+```text
+Order Service:
+Order created and event published
+
+Inventory Service:
+Order event received
+Inventory checked
+Inventory updated
+Inventory response published
+
+Order Service:
+Inventory response received
+Order status updated
+```
+
+## 14. Important Learnings
+
+1. Kafka producer and consumer responsibilities are independent.
+2. A microservice can be both a producer and a consumer.
+3. `KafkaTemplate.send()` publishes a message.
+4. `@KafkaListener` receives a message.
+5. Avro provides structured event data.
+6. Schema Registry manages registered schemas.
+7. Avro Maven plugin generates Java classes.
+8. Serializers and deserializers must match the event format.
+9. Consumer group IDs determine how consumers share work.
+10. Different event types should represent different business occurrences.
+11. Event-driven communication is asynchronous.
+12. Correlation IDs such as `orderId` help connect related events.
+13. `localhost` is used by applications running on the host; Docker service names are used by containers on the same Docker network.
+
+## 15. Future Improvements
+
+- Implement actual inventory database updates.
+- Handle insufficient stock with an inventory rejection event.
+- Add retries and error handling.
+- Make consumers idempotent.
+- Use correlation IDs.
+- Move common schemas into a shared Maven module.
+- Add schema versioning and compatibility checks.
+- Implement the transactional outbox pattern.
+- Add integration tests for both services.
+- Containerize both Spring Boot services.
+
+## 16. Conclusion
+
+This project demonstrates asynchronous communication between Spring Boot microservices using Kafka and Avro.
+
+Order Service publishes an order event. Inventory Service consumes it, processes the stock update, and publishes a separate response event. Order Service consumes the response and updates the order status.
+
+The project provides a foundation for understanding Kafka, Avro serialization, Schema Registry, Docker networking, and event-driven microservice architecture.
